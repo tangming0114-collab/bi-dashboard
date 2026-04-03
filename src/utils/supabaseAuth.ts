@@ -24,9 +24,26 @@ const DEFAULT_ADMIN = {
 // 初始化本地默认用户（降级方案）
 function initLocalUsers(): void {
   const existingUsers = localStorage.getItem(USERS_KEY);
-  if (!existingUsers) {
-    localStorage.setItem(USERS_KEY, JSON.stringify([DEFAULT_ADMIN]));
+  let users: any[] = [];
+  
+  if (existingUsers) {
+    try {
+      users = JSON.parse(existingUsers);
+      if (!Array.isArray(users)) users = [];
+    } catch {
+      users = [];
+    }
   }
+  
+  // 确保 admin 账号存在
+  const hasAdmin = users.some((u: any) => u.username === 'admin');
+  if (!hasAdmin) {
+    users.unshift(DEFAULT_ADMIN);
+    localStorage.setItem(USERS_KEY, JSON.stringify(users));
+    console.log('[Auth] 已添加默认 admin 账号');
+  }
+  
+  console.log('[Auth] 本地用户列表:', users.map((u: any) => u.username));
 }
 
 // ============ Supabase 认证 ============
@@ -183,16 +200,26 @@ export async function login(
 
 // LocalStorage 登录
 function loginWithLocalStorage(username: string, password: string): { success: boolean; message: string; user?: User } {
+  console.log('[Auth] 使用 localStorage 登录:', username);
   initLocalUsers();
-  const users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
+  
+  const usersStr = localStorage.getItem(USERS_KEY);
+  console.log('[Auth] 本地存储的用户数据:', usersStr);
+  
+  const users = JSON.parse(usersStr || '[]');
+  console.log('[Auth] 解析后的用户列表:', users.map((u: any) => ({ username: u.username, hasPassword: !!u.password })));
+  
   const user = users.find((u: any) => u.username === username && u.password === password);
+  console.log('[Auth] 匹配到的用户:', user ? '找到' : '未找到');
 
   if (user) {
     const { password, ...userWithoutPassword } = user;
     localStorage.setItem(AUTH_KEY, JSON.stringify(userWithoutPassword));
+    console.log('[Auth] 登录成功');
     return { success: true, message: '登录成功', user: userWithoutPassword };
   }
 
+  console.log('[Auth] 登录失败: 用户名或密码错误');
   return { success: false, message: '用户名或密码错误' };
 }
 
