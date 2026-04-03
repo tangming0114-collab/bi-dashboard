@@ -113,12 +113,22 @@ export async function registerUser(
   return { success: true, message: '注册成功', user: userWithoutPassword };
 }
 
+// 检查 Supabase 连接是否可用
+async function checkSupabaseConnection(): Promise<boolean> {
+  try {
+    const { error } = await supabase.from('users').select('count').limit(1);
+    return !error || error.code !== 'ERR_NAME_NOT_RESOLVED';
+  } catch (e) {
+    return false;
+  }
+}
+
 // 登录
 export async function login(
   username: string,
   password: string
 ): Promise<{ success: boolean; message: string; user?: User }> {
-  // 如果Supabase已配置，使用Supabase
+  // 如果Supabase已配置，先尝试使用Supabase
   if (isSupabaseConfigured()) {
     try {
       const { data, error } = await supabase
@@ -128,7 +138,18 @@ export async function login(
         .eq('password', password) // 注意：生产环境应该使用加密比较
         .single();
 
-      if (error || !data) {
+      if (error) {
+        // 如果是连接错误，降级到 localStorage
+        if (error.message?.includes('ERR_NAME_NOT_RESOLVED') || 
+            error.message?.includes('fetch') ||
+            error.message?.includes('network')) {
+          console.warn('Supabase 连接失败，降级到 localStorage');
+          return loginWithLocalStorage(username, password);
+        }
+        return { success: false, message: '用户名或密码错误' };
+      }
+
+      if (!data) {
         return { success: false, message: '用户名或密码错误' };
       }
 
@@ -143,13 +164,25 @@ export async function login(
       localStorage.setItem(AUTH_KEY, JSON.stringify(user));
 
       return { success: true, message: '登录成功', user };
-    } catch (error) {
+    } catch (error: any) {
       console.error('登录错误:', error);
+      // 网络错误时降级到 localStorage
+      if (error?.message?.includes('ERR_NAME_NOT_RESOLVED') || 
+          error?.message?.includes('fetch') ||
+          error?.message?.includes('Failed to fetch')) {
+        console.warn('Supabase 连接失败，降级到 localStorage');
+        return loginWithLocalStorage(username, password);
+      }
       return { success: false, message: '登录失败，请稍后重试' };
     }
   }
 
   // 降级方案：使用 localStorage
+  return loginWithLocalStorage(username, password);
+}
+
+// LocalStorage 登录
+function loginWithLocalStorage(username: string, password: string): { success: boolean; message: string; user?: User } {
   initLocalUsers();
   const users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
   const user = users.find((u: any) => u.username === username && u.password === password);
